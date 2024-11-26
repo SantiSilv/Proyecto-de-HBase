@@ -1,0 +1,173 @@
+import happybase
+import pandas as pd
+from datetime import datetime
+
+# Metodo para crear recuadro (para impresión de resultados)
+
+
+def imprimir_recuadro(datos):
+    ancho = max(len(f"{campo}: {valor}") for campo, valor in datos.items()) + 4
+    print("+" + "-" * ancho + "+")
+    for campo, valor in datos.items():
+        print(f"| {campo}: {valor}".ljust(ancho+1) + "|")
+    print("+" + "-" * ancho + "+")
+
+# Conectar a HBase
+
+
+def conectar_hbase():
+    try:
+        connection = happybase.Connection('localhost')
+        print("Se estableció conexión con HBase")
+        return connection
+    except Exception as e:
+        print(f'Error al conectar con HBase: {str(e)}')
+        return None
+
+# Crear la tabla en HBase
+
+
+def crear_tabla(connection):
+    table_name = 'Datos_de_Nacimientos_Colombia'
+    families = {
+        'basic': dict(),
+        'birth': dict(),
+        'parent': dict(),
+        'health': dict()
+    }
+
+    if table_name.encode() in connection.tables():
+        print(f'Eliminando la tabla existente-{table_name}')
+        connection.delete_table(table_name, disable=True)
+
+    connection.create_table(table_name, families)
+    table = connection.table(table_name)
+    print(f"Tabla '{table_name}' creada exitosamente")
+    return table
+
+# Cargar datos en la tabla de HBase
+
+
+def cargar_datos(table, data_file):
+    try:
+        fam_data = pd.read_csv(data_file)
+        print(f'Columnas detectadas: {fam_data.columns}')
+
+        for index, row in fam_data.iterrows():
+            row_key = f"{row['departamento_nacimiento']}_{
+                row['fecha_nacimiento']}_{index}".encode()  # Línea corregida
+
+            data = {
+                b'basic:periodo': str(row['periodo']).encode(),
+                b'basic:departamento_nacimiento': str(row['departamento_nacimiento']).encode(),
+                b'basic:municipio': str(row['municipio']).encode(),
+                b'birth:peso': str(row['peso']).encode(),
+                b'birth:talla': str(row['talla']).encode(),
+                b'birth:fecha_nacimiento': str(row['fecha_nacimiento']).encode(),
+                b'birth:hora_nacimiento': str(row['hora_nacimiento']).encode(),
+                b'birth:tiempo_gestacion': str(row['tiempo_gestaci_n']).encode(),
+                b'parent:edad_madre': str(row['edad_madre']).encode(),
+                b'parent:edad_padre': str(row['edad_padre']).encode(),
+                b'health:eps': str(row['eps']).encode(),
+                b'health:regimen_seguridad_social': str(row['r_gimen_seguridad_social']).encode(),
+                b'health:consultas_prenatales': str(row['n_mero_consultas_prenatales']).encode(),
+                b'basic:tipo_parto': str(row['tipo_parto']).encode()
+            }
+
+            table.put(row_key, data)
+        print('Datos cargados exitosamente')
+    except Exception as e:
+        print(f'Error al cargar los datos: {str(e)}')
+
+# Consultas de selección, filtrado y recorrido
+
+
+def consultar_datos(table):
+    # Filtrado por "tipo_parto"
+    tipo_parto_filtro = 'CESÁREA'
+    print(f"\nConsulta: Filtrado por tipo de parto '{tipo_parto_filtro}':")
+    for key, data in table.scan():
+        if data[b'basic:tipo_parto'].decode() == tipo_parto_filtro:
+            datos = {
+                "Clave": key.decode(),
+                "Departamento": data[b'basic:departamento_nacimiento'].decode(),
+                "Peso": data[b'birth:peso'].decode(),
+                "Talla": data[b'birth:talla'].decode(),
+                "Edad Madre": data[b'parent:edad_madre'].decode(),
+                "Tipo de Parto": data[b'basic:tipo_parto'].decode()
+            }
+            imprimir_recuadro(datos)
+    input("\nPresiona Enter para continuar...")
+
+    # Recorrido completo de todos los registros
+    print("\nRecorrido completo de todos los registros:")
+    for key, data in table.scan():
+        datos = {
+            "Clave": key.decode(),
+            "Departamento": data[b'basic:departamento_nacimiento'].decode(),
+            "Municipio": data[b'basic:municipio'].decode(),
+            "Peso": data[b'birth:peso'].decode(),
+            "Talla": data[b'birth:talla'].decode(),
+            "Fecha Nacimiento": data[b'birth:fecha_nacimiento'].decode(),
+            "Edad Madre": data[b'parent:edad_madre'].decode(),
+            "Tipo de Parto": data[b'basic:tipo_parto'].decode()
+        }
+        imprimir_recuadro(datos)
+    input("\nPresiona Enter para continuar...")
+
+# Operaciones de escritura (inserción, actualización, eliminación)
+
+
+def operaciones_escritura(table):
+    # Inserción de un nuevo registro
+    print('\nInsertando un nuevo registro:')
+    nueva_fila = {
+        b'basic:periodo': b'2024',
+        b'basic:departamento_nacimiento': b'Antioquia',
+        b'basic:municipio': b'Medellin',
+        b'birth:peso': b'3.5',
+        b'birth:talla': b'50',
+        b'birth:fecha_nacimiento': b'2024-11-19',
+        b'birth:hora_nacimiento': b'10:00',
+        b'birth:tiempo_gestacion': b'38',
+        b'parent:edad_madre': b'27',
+        b'parent:edad_padre': b'30',
+        b'health:eps': b'SURA',
+        b'health:regimen_seguridad_social': b'Contributivo',
+        b'health:consultas_prenatales': b'4',
+        b'basic:tipo_parto': b'Normal'
+    }
+    table.put(b'Antioquia_2024-11-19_999', nueva_fila)
+    print("Nuevo registro insertado.")
+    input("\nPresiona Enter para continuar...")
+
+    # Actualización de un registro
+    print("\nActualizando un registro:")
+    clave_actualizar = b'Antioquia_2024-11-19_999'
+    updated_data = {b'basic:periodo': b'2025'}  
+    table.put(clave_actualizar, updated_data)
+    print(f"Registro con clave {clave_actualizar.decode()} actualizado.")
+    input("\nPresiona Enter para continuar...")
+
+    # Eliminación de un registro
+    print("\nEliminando un registro:")
+    clave_eliminar = b'Antioquia_2024-11-19_999'
+    table.delete(clave_eliminar)
+    print(f"Registro con clave {clave_eliminar.decode()} eliminado.")
+    input("\nPresiona Enter para continuar...")
+
+# Función principal
+
+
+def main():
+    connection = conectar_hbase()
+    if connection:
+        table = crear_tabla(connection)
+        cargar_datos(table, 'ttnc-9dzn.csv')  # El archivo CSV que se cargará
+        consultar_datos(table)  # Consultas y filtros
+        operaciones_escritura(table)
+        connection.close()  # Cerrar conexión
+
+
+if __name__ == '__main__':
+    main()
